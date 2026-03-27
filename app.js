@@ -223,7 +223,7 @@ function selectView(view, memberId) {
     if (!isBoss() && members.length > 0) { showToast('부장만 접근할 수 있습니다.'); return; }
     showEl('view-manage');
     document.getElementById('headerManage').style.display    = 'flex';
-    document.getElementById('addMemberBtn').style.display    = 'inline-flex';
+    document.getElementById('addMemberBtn').style.display    = isBoss() ? 'inline-flex' : 'none';
     renderManage();
   }
   renderSidebar();
