@@ -220,7 +220,7 @@ function selectView(view, memberId) {
     updateYearLabel();
     renderMemberTasks();
   } else if (view === 'manage') {
-    if (!isBoss()) { showToast('부장만 접근할 수 있습니다.'); return; }
+    if (!isBoss() && members.length > 0) { showToast('부장만 접근할 수 있습니다.'); return; }
     showEl('view-manage');
     document.getElementById('headerManage').style.display    = 'flex';
     document.getElementById('addMemberBtn').style.display    = 'inline-flex';
@@ -701,7 +701,7 @@ function renderCurrentUser() {
   const name   = document.getElementById('currentUserName');
   const role   = document.getElementById('currentUserRole');
   const m = getMember(currentUserId);
-  document.querySelector('.manage-btn').style.display = isBoss() ? 'flex' : 'none';
+  document.querySelector('.manage-btn').style.display = (isBoss() || members.length === 0) ? 'flex' : 'none';
   if (m) {
     avatar.style.background = m.color;
     avatar.textContent = m.name[0];
