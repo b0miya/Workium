@@ -702,6 +702,7 @@ function renderCurrentUser() {
   const role   = document.getElementById('currentUserRole');
   const m = getMember(currentUserId);
   document.querySelector('.manage-btn').style.display = (isBoss() || members.length === 0) ? 'flex' : 'none';
+  document.getElementById('addMemberBtn').style.display = isBoss() ? 'inline-flex' : 'none';
   if (m) {
     avatar.style.background = m.color;
     avatar.textContent = m.name[0];
