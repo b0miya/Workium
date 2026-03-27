@@ -1,0 +1,735 @@
+// ══════════════════════════════════════════════════════
+//  부서업무관리 app.js — Firebase Firestore 버전
+// ══════════════════════════════════════════════════════
+
+// ── 상수 ──────────────────────────────────────────────
+const COLORS = ['#4f6ef7','#22c55e','#f59e0b','#ef4444','#8b5cf6','#ec4899','#14b8a6','#f97316'];
+const DEFAULT_NOTICE =
+`• 업무는 해당 월의 본인 탭에서 직접 입력합니다.
+• 업무명은 간결하게 작성하고, 세부 내용은 메모란을 활용해 주세요.
+• 날짜는 업무 예정일 또는 완료일 기준으로 입력합니다.
+• 전체 보기에서 부서원 전체의 이번 달 업무를 확인할 수 있습니다.
+• 문의 사항은 팀장에게 연락 바랍니다.`;
+
+// ── 상태 ──────────────────────────────────────────────
+let members    = [];
+let tasks      = [];
+let sites      = [];
+let noticeText = DEFAULT_NOTICE;
+let noticeBeforeEdit = '';
+
+let currentView     = 'all';
+let currentMemberId = null;
+let currentYear     = new Date().getFullYear();
+let currentMonth    = new Date().getMonth() + 1;
+let selectedColor   = COLORS[0];
+let currentUserId   = sessionStorage.getItem('workium_user') || null;
+
+let _ready = false;
+const _loaded = { members: false, tasks: false, sites: false, notice: false };
+
+// ── Firebase 초기화 ────────────────────────────────────
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+const ts = () => firebase.firestore.FieldValue.serverTimestamp();
+
+// ── Firestore CRUD ─────────────────────────────────────
+
+async function dbAddMember(data) {
+  await db.collection('members').add({ ...data, createdAt: ts() });
+}
+async function dbUpdateMember(id, data) {
+  await db.collection('members').doc(id).update(data);
+}
+async function dbDeleteMember(id) {
+  await db.collection('members').doc(id).delete();
+  const snap = await db.collection('tasks').where('memberId', '==', id).get();
+  if (!snap.empty) {
+    const batch = db.batch();
+    snap.docs.forEach(d => batch.delete(d.ref));
+    await batch.commit();
+  }
+}
+
+async function dbAddTask(data) {
+  await db.collection('tasks').add({ ...data, createdAt: ts() });
+}
+async function dbUpdateTask(id, data) {
+  await db.collection('tasks').doc(id).update(data);
+}
+async function dbDeleteTask(id) {
+  await db.collection('tasks').doc(id).delete();
+}
+
+async function dbAddSite(data) {
+  await db.collection('sites').add({ ...data, createdAt: ts() });
+}
+async function dbUpdateSite(id, data) {
+  await db.collection('sites').doc(id).update(data);
+}
+async function dbDeleteSite(id) {
+  await db.collection('sites').doc(id).delete();
+}
+
+async function dbSaveNotice(text) {
+  await db.collection('config').doc('notice').set({ text });
+}
+
+// ── 로딩 ──────────────────────────────────────────────
+function showLoading() { document.getElementById('loadingOverlay').style.display = 'flex'; }
+function hideLoading() { document.getElementById('loadingOverlay').style.display = 'none'; }
+
+// ── 실시간 리스너 ──────────────────────────────────────
+function _checkReady() {
+  if (_ready) return;
+  if (!_loaded.members || !_loaded.tasks || !_loaded.sites || !_loaded.notice) return;
+  _ready = true;
+  hideLoading();
+  updateMonthLabel();
+  updateYearLabel();
+  renderCurrentUser();
+  renderSidebar();
+  renderNotice();
+  renderSites();
+  renderAll();
+  if (!currentUserId) openLoginModal();
+}
+
+function initListeners() {
+  db.collection('members').orderBy('createdAt').onSnapshot(snap => {
+    members = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    if (!_loaded.members) { _loaded.members = true; _checkReady(); return; }
+    renderSidebar();
+    _refreshView();
+  }, e => console.error(e));
+
+  db.collection('tasks').onSnapshot(snap => {
+    tasks = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    if (!_loaded.tasks) { _loaded.tasks = true; _checkReady(); return; }
+    _refreshView();
+  }, e => console.error(e));
+
+  db.collection('sites').orderBy('createdAt').onSnapshot(snap => {
+    sites = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    if (!_loaded.sites) { _loaded.sites = true; _checkReady(); return; }
+    renderSites();
+  }, e => console.error(e));
+
+  db.collection('config').doc('notice').onSnapshot(doc => {
+    noticeText = doc.exists ? doc.data().text : DEFAULT_NOTICE;
+    if (!_loaded.notice) { _loaded.notice = true; _checkReady(); return; }
+    renderNotice();
+  }, e => console.error(e));
+}
+
+function _refreshView() {
+  if (!_ready) return;
+  if (currentView === 'all')    renderAll();
+  if (currentView === 'member') renderMemberTasks();
+  if (currentView === 'manage') renderManage();
+}
+
+// ── 유틸 ──────────────────────────────────────────────
+function getMember(id) { return members.find(m => m.id === id); }
+
+function isBoss() {
+  return !!currentUserId && getMember(currentUserId)?.role === '부장';
+}
+
+function escHtml(s) {
+  if (!s) return '';
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+          .replace(/"/g,'&quot;').replace(/'/g,'&#039;');
+}
+
+function fmtDay(dateStr) {
+  if (!dateStr) return '';
+  const [, mo, d] = dateStr.split('-');
+  return `${parseInt(mo)}월 ${parseInt(d)}일`;
+}
+
+function fmtFull(dateStr) {
+  if (!dateStr) return '';
+  const [y, mo, d] = dateStr.split('-');
+  return `${y}.${mo}.${d}`;
+}
+
+function avatarHtml(m, size) {
+  const s = size ? `width:${size}px;height:${size}px;font-size:${Math.round(size*0.4)}px;` : '';
+  return `<div class="avatar-circle" style="background:${m.color};${s}">${m.name[0]}</div>`;
+}
+
+function getTasksForMonth(memberId, year, month) {
+  const prefix = `${year}-${String(month).padStart(2,'0')}`;
+  return tasks
+    .filter(t => t.memberId === memberId && t.date && t.date.startsWith(prefix))
+    .sort((a, b) => (a.date||'').localeCompare(b.date||''));
+}
+
+// ── 사이드바 ──────────────────────────────────────────
+function renderSidebar() {
+  const el = document.getElementById('memberNavList');
+  el.innerHTML = members.map(m => `
+    <button class="nav-member ${currentView==='member' && currentMemberId===m.id ? 'active' : ''}"
+            data-id="${m.id}" onclick="selectView('member','${m.id}')">
+      ${avatarHtml(m)}
+      <span>${escHtml(m.name)}</span>
+    </button>`).join('');
+  document.querySelector('.nav-member[data-id="all"]')
+    ?.classList.toggle('active', currentView === 'all');
+}
+
+// ── 뷰 전환 ──────────────────────────────────────────
+function selectView(view, memberId) {
+  currentView     = view;
+  currentMemberId = memberId || null;
+
+  document.querySelectorAll('.view').forEach(v => {
+    v.style.display = 'none'; v.classList.remove('active');
+  });
+  const showEl = id => {
+    const el = document.getElementById(id);
+    el.style.display = 'block'; el.classList.add('active');
+  };
+
+  ['headerAll','headerMember','headerManage'].forEach(id =>
+    document.getElementById(id).style.display = 'none'
+  );
+  document.getElementById('monthNav').style.display     = 'none';
+  document.getElementById('yearNav').style.display      = 'none';
+  document.getElementById('addTaskBtn').style.display   = 'none';
+  document.getElementById('addMemberBtn').style.display = 'none';
+
+  if (view === 'all') {
+    showEl('view-all');
+    document.getElementById('headerAll').style.display = 'flex';
+    document.getElementById('monthNav').style.display  = 'flex';
+    updateMonthLabel();
+    renderAll();
+  } else if (view === 'member') {
+    const m = getMember(memberId);
+    if (!m) return;
+    showEl('view-member');
+    document.getElementById('headerMember').style.display = 'flex';
+    document.getElementById('memberAvatarHeader').style.background = m.color;
+    document.getElementById('memberAvatarHeader').textContent = m.name[0];
+    document.getElementById('memberNameHeader').textContent   = m.name;
+    document.getElementById('memberRoleHeader').textContent   = m.role || '';
+    document.getElementById('yearNav').style.display = 'flex';
+    updateYearLabel();
+    renderMemberTasks();
+  } else if (view === 'manage') {
+    if (!isBoss()) { showToast('부장만 접근할 수 있습니다.'); return; }
+    showEl('view-manage');
+    document.getElementById('headerManage').style.display    = 'flex';
+    document.getElementById('addMemberBtn').style.display    = 'inline-flex';
+    renderManage();
+  }
+  renderSidebar();
+}
+
+function openMembersPage() { selectView('manage'); }
+
+// ── 월/연도 네비게이션 ────────────────────────────────
+function changeMonth(delta) {
+  currentMonth += delta;
+  if (currentMonth > 12) { currentMonth = 1;  currentYear++; }
+  if (currentMonth < 1)  { currentMonth = 12; currentYear--; }
+  updateMonthLabel();
+  renderAll();
+}
+function updateMonthLabel() {
+  document.getElementById('monthLabel').textContent = `${currentYear}년 ${currentMonth}월`;
+}
+
+function changeYear(delta) {
+  currentYear += delta;
+  updateYearLabel();
+  renderMemberTasks();
+}
+function updateYearLabel() {
+  document.getElementById('yearLabel').textContent = `${currentYear}년`;
+}
+
+// ── 전체 보기 ─────────────────────────────────────────
+function renderAll() {
+  const grid = document.getElementById('allGrid');
+  if (members.length === 0) {
+    grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1">
+      <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3">
+        <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/>
+      </svg>
+      <p>부서원을 먼저 추가해주세요.</p></div>`;
+    return;
+  }
+  grid.innerHTML = members.map(m => {
+    const mTasks = getTasksForMonth(m.id, currentYear, currentMonth);
+    const rows = mTasks.length
+      ? mTasks.map(t => `
+          <div class="all-task-row">
+            <div class="task-date-dot" style="background:${m.color}"></div>
+            <div class="all-task-info">
+              <div class="all-task-title">${escHtml(t.title)}</div>
+              <div class="all-task-date">${fmtFull(t.date)}</div>
+              ${t.memo ? `<div class="all-task-memo">${escHtml(t.memo)}</div>` : ''}
+            </div>
+          </div>`).join('')
+      : `<div class="all-empty">이번 달 업무 없음</div>`;
+    return `
+    <div class="all-member-card">
+      <div class="all-member-card-header" onclick="selectView('member','${m.id}')">
+        ${avatarHtml(m, 36)}
+        <div>
+          <div class="name">${escHtml(m.name)}</div>
+          <div class="role">${escHtml(m.role || '')}</div>
+        </div>
+        <span class="task-count-badge">${mTasks.length}건</span>
+      </div>
+      <div class="all-member-tasks">${rows}</div>
+    </div>`;
+  }).join('');
+}
+
+// ── 개인 업무 뷰 (12개 월 섹션) ──────────────────────
+function renderMemberTasks() {
+  const wrap = document.getElementById('memberTasksWrap');
+  const MONTHS = ['1월','2월','3월','4월','5월','6월','7월','8월','9월','10월','11월','12월'];
+  const m = getMember(currentMemberId);
+  const dotColor = m ? m.color : '#4f6ef7';
+
+  wrap.innerHTML = MONTHS.map((label, idx) => {
+    const mo     = idx + 1;
+    const mTasks = getTasksForMonth(currentMemberId, currentYear, mo);
+    const rows   = mTasks.length
+      ? mTasks.map(t => `
+        <tr>
+          <td class="td-date">${fmtDay(t.date)}</td>
+          <td>
+            <div class="td-title">${escHtml(t.title)}</div>
+            ${t.memo ? `<div class="td-memo">${escHtml(t.memo)}</div>` : ''}
+          </td>
+          <td class="td-actions">
+            <button class="btn-icon" onclick="openTaskModal('${t.id}')" title="수정">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/>
+                <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>
+              </svg>
+            </button>
+            <button class="btn-icon btn-del" onclick="deleteTask('${t.id}')" title="삭제">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="3 6 5 6 21 6"/>
+                <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>
+                <path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/>
+              </svg>
+            </button>
+          </td>
+        </tr>`).join('')
+      : `<tr><td colspan="3" class="td-empty">등록된 업무가 없습니다.</td></tr>`;
+
+    return `
+    <div class="month-section">
+      <div class="month-section-header">
+        <span class="month-dot" style="background:${dotColor}"></span>
+        <h3 class="month-section-title">${label}</h3>
+        <span class="month-task-cnt">${mTasks.length}건</span>
+        <button class="btn-add-task" onclick="openTaskModal(null,${mo})">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+          </svg>
+          업무 추가
+        </button>
+      </div>
+      <table class="task-table"><tbody>${rows}</tbody></table>
+    </div>`;
+  }).join('');
+}
+
+// ── 업무 모달 ─────────────────────────────────────────
+function openTaskModal(id, addMonth) {
+  const modal = document.getElementById('taskModal');
+  if (id) {
+    const t = tasks.find(t => t.id === id);
+    if (!t) return;
+    document.getElementById('taskModalTitle').textContent = '업무 수정';
+    document.getElementById('taskId').value    = t.id;
+    document.getElementById('taskTitle').value = t.title;
+    document.getElementById('taskDate').value  = t.date || '';
+    document.getElementById('taskMemo').value  = t.memo  || '';
+  } else {
+    const mo = addMonth || currentMonth;
+    document.getElementById('taskModalTitle').textContent = '업무 추가';
+    document.getElementById('taskId').value    = '';
+    document.getElementById('taskTitle').value = '';
+    document.getElementById('taskDate').value  =
+      `${currentYear}-${String(mo).padStart(2,'0')}-01`;
+    document.getElementById('taskMemo').value  = '';
+  }
+  modal.classList.add('open');
+  document.getElementById('taskTitle').focus();
+}
+
+function closeTaskModal() {
+  document.getElementById('taskModal').classList.remove('open');
+}
+
+async function saveTask() {
+  const title = document.getElementById('taskTitle').value.trim();
+  if (!title) { showToast('업무명을 입력해주세요.'); return; }
+
+  const id   = document.getElementById('taskId').value;
+  const data = {
+    title,
+    date: document.getElementById('taskDate').value,
+    memo: document.getElementById('taskMemo').value.trim(),
+  };
+
+  closeTaskModal();
+  try {
+    if (id) {
+      await dbUpdateTask(id, data);
+      showToast('업무가 수정되었습니다.');
+    } else {
+      await dbAddTask({ ...data, memberId: currentMemberId });
+      showToast('업무가 추가되었습니다.');
+    }
+  } catch (e) {
+    showToast('저장 중 오류가 발생했습니다.'); console.error(e);
+  }
+}
+
+async function deleteTask(id) {
+  if (!confirm('이 업무를 삭제하시겠습니까?')) return;
+  try {
+    await dbDeleteTask(id);
+    showToast('업무가 삭제되었습니다.');
+  } catch (e) {
+    showToast('삭제 중 오류가 발생했습니다.'); console.error(e);
+  }
+}
+
+// ── 부서원 관리 ────────────────────────────────────────
+function renderManage() {
+  const grid = document.getElementById('membersGrid');
+  if (members.length === 0) {
+    grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1">
+      <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3">
+        <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/>
+      </svg>
+      <p>부서원이 없습니다.</p></div>`;
+    return;
+  }
+  grid.innerHTML = members.map(m => {
+    const cnt = tasks.filter(t => t.memberId === m.id).length;
+    return `
+    <div class="member-card">
+      <div class="avatar-circle" style="background:${m.color};width:52px;height:52px;font-size:20px">${m.name[0]}</div>
+      <div class="member-card-name">${escHtml(m.name)}</div>
+      <div class="member-card-role">${escHtml(m.role || '')}</div>
+      ${m.email ? `<div class="member-card-email">${escHtml(m.email)}</div>` : ''}
+      <div class="member-card-cnt">전체 업무 ${cnt}건</div>
+      <div class="member-card-actions">
+        <button class="btn btn-ghost btn-sm" onclick="openMemberModal('${m.id}')">수정</button>
+        <button class="btn btn-sm" style="background:var(--danger-light);color:var(--danger)"
+                onclick="deleteMember('${m.id}')">삭제</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ── 부서원 모달 ────────────────────────────────────────
+function buildColorPicker(current) {
+  selectedColor = current || COLORS[0];
+  document.getElementById('colorPicker').innerHTML = COLORS.map(c =>
+    `<div class="color-swatch ${c === selectedColor ? 'selected' : ''}"
+         style="background:${c}" onclick="selectColor('${c}')"></div>`
+  ).join('');
+}
+
+function selectColor(c) {
+  selectedColor = c;
+  document.querySelectorAll('.color-swatch').forEach(el => {
+    const hex = rgbToHex(el.style.backgroundColor) || el.style.backgroundColor;
+    el.classList.toggle('selected', c === hex);
+  });
+}
+
+function rgbToHex(rgb) {
+  const m = rgb.match(/^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/);
+  if (!m) return null;
+  return '#' + [m[1],m[2],m[3]].map(x => parseInt(x).toString(16).padStart(2,'0')).join('');
+}
+
+function openMemberModal(id) {
+  const modal = document.getElementById('memberModal');
+  if (id) {
+    const m = getMember(id);
+    if (!m) return;
+    document.getElementById('memberModalTitle').textContent = '부서원 수정';
+    document.getElementById('memberId').value    = m.id;
+    document.getElementById('memberName').value  = m.name;
+    document.getElementById('memberRole').value  = m.role  || '';
+    document.getElementById('memberEmail').value = m.email || '';
+    buildColorPicker(m.color);
+  } else {
+    document.getElementById('memberModalTitle').textContent = '부서원 추가';
+    document.getElementById('memberId').value    = '';
+    document.getElementById('memberName').value  = '';
+    document.getElementById('memberRole').value  = '';
+    document.getElementById('memberEmail').value = '';
+    buildColorPicker();
+  }
+  modal.classList.add('open');
+  document.getElementById('memberName').focus();
+}
+
+function closeMemberModal() {
+  document.getElementById('memberModal').classList.remove('open');
+}
+
+async function saveMember() {
+  const name = document.getElementById('memberName').value.trim();
+  if (!name) { showToast('이름을 입력해주세요.'); return; }
+
+  const id   = document.getElementById('memberId').value;
+  const data = {
+    name,
+    role:  document.getElementById('memberRole').value.trim(),
+    email: document.getElementById('memberEmail').value.trim(),
+    color: selectedColor,
+  };
+
+  closeMemberModal();
+  try {
+    if (id) {
+      await dbUpdateMember(id, data);
+      showToast('수정되었습니다.');
+    } else {
+      await dbAddMember(data);
+      showToast('부서원이 추가되었습니다.');
+    }
+  } catch (e) {
+    showToast('저장 중 오류가 발생했습니다.'); console.error(e);
+  }
+}
+
+async function deleteMember(id) {
+  const m = getMember(id);
+  if (!confirm(`"${m?.name}"을(를) 삭제하면 해당 부서원의 모든 업무도 삭제됩니다.\n계속하시겠습니까?`)) return;
+  try {
+    await dbDeleteMember(id);
+    if (currentUserId === id) {
+      currentUserId = null;
+      sessionStorage.removeItem('workium_user');
+      renderCurrentUser();
+    }
+    showToast('부서원이 삭제되었습니다.');
+  } catch (e) {
+    showToast('삭제 중 오류가 발생했습니다.'); console.error(e);
+  }
+}
+
+// ── 공지 ──────────────────────────────────────────────
+function renderNotice() {
+  document.getElementById('noticeContent').innerHTML =
+    escHtml(noticeText).replace(/\n/g, '<br>');
+  document.getElementById('noticeEditBtn').style.display =
+    isBoss() ? 'inline-flex' : 'none';
+}
+
+function toggleNoticeEdit() {
+  noticeBeforeEdit = noticeText;
+  document.getElementById('noticeContent').style.display  = 'none';
+  document.getElementById('noticeEditArea').style.display = 'block';
+  document.getElementById('noticeEditBtn').style.display  = 'none';
+  const ta = document.getElementById('noticeTextarea');
+  ta.value = noticeText;
+  ta.focus();
+}
+
+function cancelNoticeEdit() {
+  document.getElementById('noticeContent').style.display  = 'block';
+  document.getElementById('noticeEditArea').style.display = 'none';
+  document.getElementById('noticeEditBtn').style.display  = isBoss() ? 'inline-flex' : 'none';
+}
+
+async function saveNotice() {
+  const text = document.getElementById('noticeTextarea').value;
+  try {
+    await dbSaveNotice(text);
+    showToast('공지가 저장되었습니다.');
+    cancelNoticeEdit();
+  } catch (e) {
+    showToast('저장 중 오류가 발생했습니다.'); console.error(e);
+  }
+}
+
+// ── 사이트 ────────────────────────────────────────────
+function renderSites() {
+  const el     = document.getElementById('sitesList');
+  const addBtn = document.querySelector('.sites-panel .notice-edit-btn');
+  if (addBtn) addBtn.style.display = isBoss() ? 'inline-flex' : 'none';
+
+  if (sites.length === 0) {
+    el.innerHTML = `<span style="font-size:13px;color:#b45309;opacity:.6">등록된 사이트가 없습니다.</span>`;
+    return;
+  }
+
+  const editBtns = isBoss() ? `
+    <div class="site-actions">
+      <button class="btn-icon" onclick="openSiteModal('__ID__')" title="수정">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/>
+          <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>
+        </svg>
+      </button>
+      <button class="btn-icon btn-del" onclick="deleteSite('__ID__')" title="삭제">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="3 6 5 6 21 6"/>
+          <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>
+          <path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/>
+        </svg>
+      </button>
+    </div>` : '';
+
+  el.innerHTML = sites.map(s => `
+    <div class="site-item">
+      <div class="site-favicon">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"/>
+          <line x1="2" y1="12" x2="22" y2="12"/>
+          <path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/>
+        </svg>
+      </div>
+      <div class="site-info">
+        <a href="${escHtml(s.url)}" target="_blank" rel="noopener" class="site-name">${escHtml(s.name)}</a>
+        ${s.desc ? `<span class="site-desc">${escHtml(s.desc)}</span>` : ''}
+      </div>
+      ${editBtns.replaceAll('__ID__', s.id)}
+    </div>`).join('');
+}
+
+function openSiteModal(id) {
+  const modal = document.getElementById('siteModal');
+  if (id) {
+    const s = sites.find(s => s.id === id);
+    if (!s) return;
+    document.getElementById('siteModalTitle').textContent = '사이트 수정';
+    document.getElementById('siteId').value   = s.id;
+    document.getElementById('siteName').value = s.name;
+    document.getElementById('siteUrl').value  = s.url;
+    document.getElementById('siteDesc').value = s.desc || '';
+  } else {
+    document.getElementById('siteModalTitle').textContent = '사이트 추가';
+    document.getElementById('siteId').value   = '';
+    document.getElementById('siteName').value = '';
+    document.getElementById('siteUrl').value  = '';
+    document.getElementById('siteDesc').value = '';
+  }
+  modal.classList.add('open');
+  document.getElementById('siteName').focus();
+}
+
+function closeSiteModal() {
+  document.getElementById('siteModal').classList.remove('open');
+}
+
+async function saveSite() {
+  const name = document.getElementById('siteName').value.trim();
+  let   url  = document.getElementById('siteUrl').value.trim();
+  if (!name) { showToast('사이트명을 입력해주세요.'); return; }
+  if (!url)  { showToast('URL을 입력해주세요.');      return; }
+  if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
+
+  const id   = document.getElementById('siteId').value;
+  const data = { name, url, desc: document.getElementById('siteDesc').value.trim() };
+
+  closeSiteModal();
+  try {
+    if (id) {
+      await dbUpdateSite(id, data);
+      showToast('사이트가 수정되었습니다.');
+    } else {
+      await dbAddSite(data);
+      showToast('사이트가 추가되었습니다.');
+    }
+  } catch (e) {
+    showToast('저장 중 오류가 발생했습니다.'); console.error(e);
+  }
+}
+
+async function deleteSite(id) {
+  if (!confirm('이 사이트를 삭제하시겠습니까?')) return;
+  try {
+    await dbDeleteSite(id);
+    showToast('사이트가 삭제되었습니다.');
+  } catch (e) {
+    showToast('삭제 중 오류가 발생했습니다.'); console.error(e);
+  }
+}
+
+// ── 접속자 선택 ───────────────────────────────────────
+function openLoginModal() {
+  const list = document.getElementById('loginMemberList');
+  list.innerHTML = members.map(m => `
+    <button class="login-member-btn ${m.id === currentUserId ? 'selected' : ''}"
+            onclick="selectUser('${m.id}')">
+      <div class="avatar-circle" style="background:${m.color};width:36px;height:36px;font-size:14px">${m.name[0]}</div>
+      <div>
+        <div style="font-weight:700;font-size:13.5px">${escHtml(m.name)}</div>
+        <div style="font-size:12px;color:#94a3b8">${escHtml(m.role || '')}</div>
+      </div>
+      ${m.id === currentUserId
+        ? `<svg style="margin-left:auto;color:#4f6ef7" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>`
+        : ''}
+    </button>`).join('');
+  document.getElementById('loginModal').classList.add('open');
+}
+
+function selectUser(id) {
+  currentUserId = id;
+  sessionStorage.setItem('workium_user', id);
+  document.getElementById('loginModal').classList.remove('open');
+  renderCurrentUser();
+  renderNotice();
+  renderSites();
+  showToast(`${getMember(id)?.name}님으로 접속했습니다.`);
+}
+
+function renderCurrentUser() {
+  const avatar = document.getElementById('currentUserAvatar');
+  const name   = document.getElementById('currentUserName');
+  const role   = document.getElementById('currentUserRole');
+  const m = getMember(currentUserId);
+  document.querySelector('.manage-btn').style.display = isBoss() ? 'flex' : 'none';
+  if (m) {
+    avatar.style.background = m.color;
+    avatar.textContent = m.name[0];
+    name.textContent   = m.name;
+    role.innerHTML     = isBoss()
+      ? `${escHtml(m.role)} <span class="boss-badge">편집권한</span>`
+      : escHtml(m.role || '');
+  } else {
+    avatar.style.background = '#cbd5e1';
+    avatar.textContent = '?';
+    name.textContent   = '접속자 선택';
+    role.textContent   = '클릭하여 선택';
+  }
+}
+
+// ── 모달 외부 클릭 닫기 ───────────────────────────────
+document.querySelectorAll('.modal-overlay').forEach(o =>
+  o.addEventListener('click', e => { if (e.target === o) o.classList.remove('open'); })
+);
+
+// ── 토스트 ────────────────────────────────────────────
+function showToast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.classList.remove('show'), 2400);
+}
+
+// ── 초기화 ────────────────────────────────────────────
+showLoading();
+initListeners();
