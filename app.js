@@ -100,6 +100,7 @@ function initListeners() {
     members = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     if (!_loaded.members) { _loaded.members = true; _checkReady(); return; }
     renderSidebar();
+    renderCurrentUser();
     _refreshView();
   }, e => console.error(e));
 
