@@ -301,6 +301,7 @@ function renderAll() {
         <div>
           <div class="name">${escHtml(m.name)}</div>
           <div class="role">${escHtml(m.role || '')}</div>
+          ${m.email ? `<div class="all-member-contact">${escHtml(m.email)}</div>` : ''}
         </div>
         <span class="task-count-badge">${mTasks.length}건</span>
       </div>
