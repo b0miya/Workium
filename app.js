@@ -12,11 +12,12 @@ const DEFAULT_NOTICE =
 • 문의 사항은 팀장에게 연락 바랍니다.`;
 
 // ── 상태 ──────────────────────────────────────────────
-let members     = [];
-let tasks       = [];
-let sites       = [];
-let memberSites = [];
-let noticeText  = DEFAULT_NOTICE;
+let members        = [];
+let tasks          = [];
+let sites          = [];
+let memberSites    = [];
+let memberNotices  = {};
+let noticeText     = DEFAULT_NOTICE;
 let noticeBeforeEdit = '';
 
 let currentView     = 'all';
@@ -27,7 +28,7 @@ let selectedColor   = COLORS[0];
 let currentUserId   = sessionStorage.getItem('workium_user') || null;
 
 let _ready = false;
-const _loaded = { members: false, tasks: false, sites: false, notice: false, memberSites: false };
+const _loaded = { members: false, tasks: false, sites: false, notice: false, memberSites: false, memberNotices: false };
 
 // ── Firebase 초기화 ────────────────────────────────────
 firebase.initializeApp(firebaseConfig);
@@ -93,7 +94,7 @@ function hideLoading() { document.getElementById('loadingOverlay').style.display
 // ── 실시간 리스너 ──────────────────────────────────────
 function _checkReady() {
   if (_ready) return;
-  if (!_loaded.members || !_loaded.tasks || !_loaded.sites || !_loaded.notice || !_loaded.memberSites) return;
+  if (!_loaded.members || !_loaded.tasks || !_loaded.sites || !_loaded.notice || !_loaded.memberSites || !_loaded.memberNotices) return;
   _ready = true;
   hideLoading();
   updateMonthLabel();
@@ -138,12 +139,19 @@ function initListeners() {
     if (!_loaded.memberSites) { _loaded.memberSites = true; _checkReady(); return; }
     if (currentView === 'member') renderMemberSites();
   }, e => console.error(e));
+
+  db.collection('memberNotices').onSnapshot(snap => {
+    memberNotices = {};
+    snap.docs.forEach(d => { memberNotices[d.id] = d.data().text || ''; });
+    if (!_loaded.memberNotices) { _loaded.memberNotices = true; _checkReady(); return; }
+    if (currentView === 'member') renderMemberNotice();
+  }, e => console.error(e));
 }
 
 function _refreshView() {
   if (!_ready) return;
   if (currentView === 'all')    renderAll();
-  if (currentView === 'member') { renderMemberSites(); renderMemberTasks(); }
+  if (currentView === 'member') { renderMemberNotice(); renderMemberSites(); renderMemberTasks(); }
   if (currentView === 'manage') renderManage();
 }
 
@@ -235,6 +243,7 @@ function selectView(view, memberId) {
     document.getElementById('memberRoleHeader').textContent   = m.role || '';
     document.getElementById('yearNav').style.display = 'flex';
     updateYearLabel();
+    renderMemberNotice();
     renderMemberSites();
     renderMemberTasks();
   } else if (view === 'manage') {
@@ -362,6 +371,67 @@ function renderMemberTasks() {
       <table class="task-table"><tbody>${rows}</tbody></table>
     </div>`;
   }).join('');
+}
+
+// ── 부서원 업무 안내 ──────────────────────────────────
+function renderMemberNotice() {
+  const wrap = document.getElementById('memberNoticeWrap');
+  if (!wrap) return;
+  const canEdit = isBoss() || currentUserId === currentMemberId;
+  const text    = memberNotices[currentMemberId] || '';
+
+  wrap.innerHTML = `
+    <div class="notice-panel" style="margin-bottom:20px">
+      <div class="notice-bar">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M18 8h1a4 4 0 010 8h-1"/>
+          <path d="M2 8h16v9a4 4 0 01-4 4H6a4 4 0 01-4-4V8z"/>
+          <line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/>
+        </svg>
+        <span class="notice-label">업무 안내</span>
+        ${canEdit ? `
+          <button class="notice-edit-btn" id="memberNoticeEditBtn" onclick="toggleMemberNoticeEdit()">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/>
+              <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>
+            </svg>
+            편집
+          </button>` : ''}
+      </div>
+      <div class="notice-content" id="memberNoticeContent">
+        ${text ? escHtml(text).replace(/\n/g,'<br>') : '<span style="opacity:.4">업무 안내 사항을 입력하세요.</span>'}
+      </div>
+      <div class="notice-edit-area" id="memberNoticeEditArea" style="display:none">
+        <textarea id="memberNoticeTextarea" rows="4" placeholder="업무에서 꼭 알아야 할 사항을 입력하세요.">${escHtml(text)}</textarea>
+        <div class="notice-edit-actions">
+          <button class="btn btn-ghost btn-sm" onclick="cancelMemberNoticeEdit()">취소</button>
+          <button class="btn btn-primary btn-sm" onclick="saveMemberNotice()">저장</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+function toggleMemberNoticeEdit() {
+  document.getElementById('memberNoticeContent').style.display  = 'none';
+  document.getElementById('memberNoticeEditArea').style.display = 'block';
+  document.getElementById('memberNoticeEditBtn').style.display  = 'none';
+  document.getElementById('memberNoticeTextarea').focus();
+}
+
+function cancelMemberNoticeEdit() {
+  document.getElementById('memberNoticeContent').style.display  = 'block';
+  document.getElementById('memberNoticeEditArea').style.display = 'none';
+  document.getElementById('memberNoticeEditBtn').style.display  = 'inline-flex';
+}
+
+async function saveMemberNotice() {
+  const text = document.getElementById('memberNoticeTextarea').value;
+  try {
+    await db.collection('memberNotices').doc(currentMemberId).set({ text });
+    showToast('업무 안내가 저장되었습니다.');
+  } catch (e) {
+    showToast('저장 중 오류가 발생했습니다.'); console.error(e);
+  }
 }
 
 // ── 부서원 추천 사이트 ────────────────────────────────
