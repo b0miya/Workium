@@ -12,10 +12,11 @@ const DEFAULT_NOTICE =
 • 문의 사항은 팀장에게 연락 바랍니다.`;
 
 // ── 상태 ──────────────────────────────────────────────
-let members    = [];
-let tasks      = [];
-let sites      = [];
-let noticeText = DEFAULT_NOTICE;
+let members     = [];
+let tasks       = [];
+let sites       = [];
+let memberSites = [];
+let noticeText  = DEFAULT_NOTICE;
 let noticeBeforeEdit = '';
 
 let currentView     = 'all';
@@ -26,7 +27,7 @@ let selectedColor   = COLORS[0];
 let currentUserId   = sessionStorage.getItem('workium_user') || null;
 
 let _ready = false;
-const _loaded = { members: false, tasks: false, sites: false, notice: false };
+const _loaded = { members: false, tasks: false, sites: false, notice: false, memberSites: false };
 
 // ── Firebase 초기화 ────────────────────────────────────
 firebase.initializeApp(firebaseConfig);
@@ -61,6 +62,16 @@ async function dbDeleteTask(id) {
   await db.collection('tasks').doc(id).delete();
 }
 
+async function dbAddMemberSite(data) {
+  await db.collection('memberSites').add({ ...data, createdAt: ts() });
+}
+async function dbUpdateMemberSite(id, data) {
+  await db.collection('memberSites').doc(id).update(data);
+}
+async function dbDeleteMemberSite(id) {
+  await db.collection('memberSites').doc(id).delete();
+}
+
 async function dbAddSite(data) {
   await db.collection('sites').add({ ...data, createdAt: ts() });
 }
@@ -82,7 +93,7 @@ function hideLoading() { document.getElementById('loadingOverlay').style.display
 // ── 실시간 리스너 ──────────────────────────────────────
 function _checkReady() {
   if (_ready) return;
-  if (!_loaded.members || !_loaded.tasks || !_loaded.sites || !_loaded.notice) return;
+  if (!_loaded.members || !_loaded.tasks || !_loaded.sites || !_loaded.notice || !_loaded.memberSites) return;
   _ready = true;
   hideLoading();
   updateMonthLabel();
@@ -121,12 +132,18 @@ function initListeners() {
     if (!_loaded.notice) { _loaded.notice = true; _checkReady(); return; }
     renderNotice();
   }, e => console.error(e));
+
+  db.collection('memberSites').orderBy('createdAt').onSnapshot(snap => {
+    memberSites = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    if (!_loaded.memberSites) { _loaded.memberSites = true; _checkReady(); return; }
+    if (currentView === 'member') renderMemberSites();
+  }, e => console.error(e));
 }
 
 function _refreshView() {
   if (!_ready) return;
   if (currentView === 'all')    renderAll();
-  if (currentView === 'member') renderMemberTasks();
+  if (currentView === 'member') { renderMemberSites(); renderMemberTasks(); }
   if (currentView === 'manage') renderManage();
 }
 
@@ -218,6 +235,7 @@ function selectView(view, memberId) {
     document.getElementById('memberRoleHeader').textContent   = m.role || '';
     document.getElementById('yearNav').style.display = 'flex';
     updateYearLabel();
+    renderMemberSites();
     renderMemberTasks();
   } else if (view === 'manage') {
     if (!isBoss() && members.length > 0) { showToast('부장만 접근할 수 있습니다.'); return; }
@@ -343,6 +361,128 @@ function renderMemberTasks() {
       <table class="task-table"><tbody>${rows}</tbody></table>
     </div>`;
   }).join('');
+}
+
+// ── 부서원 추천 사이트 ────────────────────────────────
+function renderMemberSites() {
+  const wrap = document.getElementById('memberSitesWrap');
+  if (!wrap) return;
+  const canEdit = isBoss() || currentUserId === currentMemberId;
+  const mSites  = memberSites.filter(s => s.memberId === currentMemberId);
+
+  const editBtns = `
+    <div class="site-actions">
+      <button class="btn-icon" onclick="openMemberSiteModal('__ID__')" title="수정">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/>
+          <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>
+        </svg>
+      </button>
+      <button class="btn-icon btn-del" onclick="deleteMemberSite('__ID__')" title="삭제">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="3 6 5 6 21 6"/>
+          <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>
+          <path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/>
+        </svg>
+      </button>
+    </div>`;
+
+  const sitesHtml = mSites.length
+    ? mSites.map(s => `
+      <div class="site-item">
+        <div class="site-favicon">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="2" y1="12" x2="22" y2="12"/>
+            <path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/>
+          </svg>
+        </div>
+        <div class="site-info">
+          <a href="${escHtml(s.url)}" target="_blank" rel="noopener" class="site-name">${escHtml(s.name)}</a>
+          ${s.desc ? `<span class="site-desc">${escHtml(s.desc)}</span>` : ''}
+        </div>
+        ${canEdit ? editBtns.replaceAll('__ID__', s.id) : ''}
+      </div>`).join('')
+    : `<span style="font-size:13px;color:#b45309;opacity:.6">등록된 사이트가 없습니다.</span>`;
+
+  wrap.innerHTML = `
+    <div class="notice-panel sites-panel" style="margin-bottom:20px">
+      <div class="notice-bar">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"/>
+          <line x1="2" y1="12" x2="22" y2="12"/>
+          <path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/>
+        </svg>
+        <span class="notice-label">추천 사이트</span>
+        ${canEdit ? `
+          <button class="notice-edit-btn" onclick="openMemberSiteModal()">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+            </svg>
+            추가
+          </button>` : ''}
+      </div>
+      <div class="sites-list">${sitesHtml}</div>
+    </div>`;
+}
+
+function openMemberSiteModal(id) {
+  const modal = document.getElementById('memberSiteModal');
+  if (id) {
+    const s = memberSites.find(s => s.id === id);
+    if (!s) return;
+    document.getElementById('memberSiteModalTitle').textContent = '추천 사이트 수정';
+    document.getElementById('memberSiteId').value   = s.id;
+    document.getElementById('memberSiteName').value = s.name;
+    document.getElementById('memberSiteUrl').value  = s.url;
+    document.getElementById('memberSiteDesc').value = s.desc || '';
+  } else {
+    document.getElementById('memberSiteModalTitle').textContent = '추천 사이트 추가';
+    document.getElementById('memberSiteId').value   = '';
+    document.getElementById('memberSiteName').value = '';
+    document.getElementById('memberSiteUrl').value  = '';
+    document.getElementById('memberSiteDesc').value = '';
+  }
+  modal.classList.add('open');
+  document.getElementById('memberSiteName').focus();
+}
+
+function closeMemberSiteModal() {
+  document.getElementById('memberSiteModal').classList.remove('open');
+}
+
+async function saveMemberSite() {
+  const name = document.getElementById('memberSiteName').value.trim();
+  let   url  = document.getElementById('memberSiteUrl').value.trim();
+  if (!name) { showToast('사이트명을 입력해주세요.'); return; }
+  if (!url)  { showToast('URL을 입력해주세요.');      return; }
+  if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
+
+  const id   = document.getElementById('memberSiteId').value;
+  const data = { name, url, desc: document.getElementById('memberSiteDesc').value.trim() };
+
+  closeMemberSiteModal();
+  try {
+    if (id) {
+      await dbUpdateMemberSite(id, data);
+      showToast('사이트가 수정되었습니다.');
+    } else {
+      await dbAddMemberSite({ ...data, memberId: currentMemberId });
+      showToast('사이트가 추가되었습니다.');
+    }
+  } catch (e) {
+    showToast('저장 중 오류가 발생했습니다.'); console.error(e);
+  }
+}
+
+async function deleteMemberSite(id) {
+  if (!confirm('이 사이트를 삭제하시겠습니까?')) return;
+  try {
+    await dbDeleteMemberSite(id);
+    showToast('사이트가 삭제되었습니다.');
+  } catch (e) {
+    showToast('삭제 중 오류가 발생했습니다.'); console.error(e);
+  }
 }
 
 // ── 업무 모달 ─────────────────────────────────────────
