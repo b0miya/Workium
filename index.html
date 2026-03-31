@@ -66,6 +66,14 @@
         </svg>
         부서원 관리
       </button>
+      <button class="manage-btn download-btn" style="display:none" onclick="openDownloadModal()">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+          <polyline points="7 10 12 15 17 10"/>
+          <line x1="12" y1="15" x2="12" y2="3"/>
+        </svg>
+        엑셀 다운로드
+      </button>
     </div>
   </aside>
 
@@ -387,8 +395,55 @@
   </div>
 </div>
 
+<!-- 다운로드 모달 -->
+<div class="modal-overlay" id="downloadModal">
+  <div class="modal modal-sm">
+    <div class="modal-header">
+      <h2>엑셀 다운로드</h2>
+      <button class="modal-close" onclick="closeDownloadModal()">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label>연도</label>
+        <input type="number" id="dlYear" min="2020" max="2099" style="width:100%" />
+      </div>
+      <div style="display:flex;gap:12px">
+        <div class="form-group" style="flex:1">
+          <label>시작월</label>
+          <select id="dlStartMonth" style="width:100%;padding:8px 10px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:13px">
+            <option value="1">1월</option><option value="2">2월</option><option value="3">3월</option>
+            <option value="4">4월</option><option value="5">5월</option><option value="6">6월</option>
+            <option value="7">7월</option><option value="8">8월</option><option value="9">9월</option>
+            <option value="10">10월</option><option value="11">11월</option><option value="12">12월</option>
+          </select>
+        </div>
+        <div class="form-group" style="flex:1">
+          <label>종료월</label>
+          <select id="dlEndMonth" style="width:100%;padding:8px 10px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:13px">
+            <option value="1">1월</option><option value="2">2월</option><option value="3">3월</option>
+            <option value="4">4월</option><option value="5">5월</option><option value="6">6월</option>
+            <option value="7">7월</option><option value="8">8월</option><option value="9">9월</option>
+            <option value="10">10월</option><option value="11">11월</option><option value="12" selected>12월</option>
+          </select>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeDownloadModal()">취소</button>
+      <button class="btn btn-primary" onclick="downloadExcel()">다운로드</button>
+    </div>
+  </div>
+</div>
+
 <!-- 토스트 -->
 <div class="toast" id="toast"></div>
+
+<!-- SheetJS -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
 <!-- Firebase SDK -->
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>

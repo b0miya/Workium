@@ -964,6 +964,7 @@ function renderCurrentUser() {
   const role   = document.getElementById('currentUserRole');
   const m = getMember(currentUserId);
   document.querySelector('.manage-btn').style.display = (isBoss() || members.length === 0) ? 'flex' : 'none';
+  document.querySelector('.download-btn').style.display = isBoss() ? 'flex' : 'none';
   document.getElementById('addMemberBtn').style.display = isBoss() ? 'inline-flex' : 'none';
   if (m) {
     avatar.style.background = m.color;
@@ -978,6 +979,44 @@ function renderCurrentUser() {
     name.textContent   = '접속자 선택';
     role.textContent   = '클릭하여 선택';
   }
+}
+
+// ── 엑셀 다운로드 ─────────────────────────────────────
+function openDownloadModal() {
+  document.getElementById('dlYear').value       = currentYear;
+  document.getElementById('dlStartMonth').value = 1;
+  document.getElementById('dlEndMonth').value   = 12;
+  document.getElementById('downloadModal').classList.add('open');
+}
+
+function closeDownloadModal() {
+  document.getElementById('downloadModal').classList.remove('open');
+}
+
+function downloadExcel() {
+  const year    = parseInt(document.getElementById('dlYear').value);
+  const startMo = parseInt(document.getElementById('dlStartMonth').value);
+  const endMo   = parseInt(document.getElementById('dlEndMonth').value);
+
+  if (isNaN(year)) { showToast('연도를 입력해주세요.'); return; }
+  if (startMo > endMo) { showToast('시작월이 종료월보다 클 수 없습니다.'); return; }
+
+  const rows = [['부서원', '직책', '월', '업무명', '메모']];
+  members.forEach(m => {
+    for (let mo = startMo; mo <= endMo; mo++) {
+      const mTasks = getTasksForMonth(m.id, year, mo);
+      mTasks.forEach(t => {
+        rows.push([m.name, m.role || '', `${mo}월`, t.title, t.memo || '']);
+      });
+    }
+  });
+
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols'] = [{ wch: 10 }, { wch: 10 }, { wch: 6 }, { wch: 30 }, { wch: 30 }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '업무목록');
+  XLSX.writeFile(wb, `업무목록_${year}년_${startMo}~${endMo}월.xlsx`);
+  closeDownloadModal();
 }
 
 // ── 모달 외부 클릭 닫기 ───────────────────────────────
