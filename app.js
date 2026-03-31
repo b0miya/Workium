@@ -585,6 +585,11 @@ function closeTaskModal() {
 }
 
 async function saveTask() {
+  if (!isBoss() && currentUserId !== currentMemberId) {
+    showToast('본인 업무만 수정할 수 있습니다.');
+    closeTaskModal();
+    return;
+  }
   const title = document.getElementById('taskTitle').value.trim();
   if (!title) { showToast('업무명을 입력해주세요.'); return; }
 
@@ -613,6 +618,10 @@ async function saveTask() {
 }
 
 async function deleteTask(id) {
+  if (!isBoss() && currentUserId !== currentMemberId) {
+    showToast('본인 업무만 삭제할 수 있습니다.');
+    return;
+  }
   if (!confirm('이 업무를 삭제하시겠습니까?')) return;
   try {
     await dbDeleteTask(id);
