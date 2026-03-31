@@ -299,7 +299,6 @@ function renderAll() {
             <div class="task-date-dot" style="background:${m.color}"></div>
             <div class="all-task-info">
               <div class="all-task-title">${escHtml(t.title)}</div>
-              <div class="all-task-date">${fmtFull(t.date)}</div>
               ${t.memo ? `<div class="all-task-memo">${escHtml(t.memo)}</div>` : ''}
             </div>
           </div>`).join('')
@@ -333,7 +332,6 @@ function renderMemberTasks() {
     const rows   = mTasks.length
       ? mTasks.map(t => `
         <tr>
-          <td class="td-date">${fmtDay(t.date)}</td>
           <td>
             <div class="td-title">${escHtml(t.title)}</div>
             ${t.memo ? `<div class="td-memo">${escHtml(t.memo)}</div>` : ''}
@@ -566,16 +564,15 @@ function openTaskModal(id, addMonth) {
     document.getElementById('taskModalTitle').textContent = '업무 수정';
     document.getElementById('taskId').value    = t.id;
     document.getElementById('taskTitle').value = t.title;
-    document.getElementById('taskDate').value  = t.date || '';
     document.getElementById('taskMemo').value  = t.memo  || '';
+    modal._month = null;
   } else {
     const mo = addMonth || currentMonth;
     document.getElementById('taskModalTitle').textContent = '업무 추가';
     document.getElementById('taskId').value    = '';
     document.getElementById('taskTitle').value = '';
-    document.getElementById('taskDate').value  =
-      `${currentYear}-${String(mo).padStart(2,'0')}-01`;
     document.getElementById('taskMemo').value  = '';
+    modal._month = mo;
   }
   modal.classList.add('open');
   document.getElementById('taskTitle').focus();
@@ -589,10 +586,13 @@ async function saveTask() {
   const title = document.getElementById('taskTitle').value.trim();
   if (!title) { showToast('업무명을 입력해주세요.'); return; }
 
-  const id   = document.getElementById('taskId').value;
-  const data = {
+  const modal = document.getElementById('taskModal');
+  const id    = document.getElementById('taskId').value;
+  const mo    = modal._month || currentMonth;
+  const date  = `${currentYear}-${String(mo).padStart(2,'0')}-01`;
+  const data  = {
     title,
-    date: document.getElementById('taskDate').value,
+    date,
     memo: document.getElementById('taskMemo').value.trim(),
   };
 
