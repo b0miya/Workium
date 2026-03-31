@@ -326,6 +326,8 @@ function renderMemberTasks() {
   const m = getMember(currentMemberId);
   const dotColor = m ? m.color : '#4f6ef7';
 
+  const canEdit = isBoss() || currentUserId === currentMemberId;
+
   wrap.innerHTML = MONTHS.map((label, idx) => {
     const mo     = idx + 1;
     const mTasks = getTasksForMonth(currentMemberId, currentYear, mo);
@@ -336,7 +338,7 @@ function renderMemberTasks() {
             <div class="td-title">${escHtml(t.title)}</div>
             ${t.memo ? `<div class="td-memo">${escHtml(t.memo)}</div>` : ''}
           </td>
-          <td class="td-actions">
+          ${canEdit ? `<td class="td-actions">
             <button class="btn-icon" onclick="openTaskModal('${t.id}')" title="수정">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/>
@@ -350,9 +352,9 @@ function renderMemberTasks() {
                 <path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/>
               </svg>
             </button>
-          </td>
+          </td>` : ''}
         </tr>`).join('')
-      : `<tr><td colspan="3" class="td-empty">등록된 업무가 없습니다.</td></tr>`;
+      : `<tr><td colspan="${canEdit ? 2 : 1}" class="td-empty">등록된 업무가 없습니다.</td></tr>`;
 
     return `
     <div class="month-section">
@@ -360,12 +362,12 @@ function renderMemberTasks() {
         <span class="month-dot" style="background:${dotColor}"></span>
         <h3 class="month-section-title">${label}</h3>
         <span class="month-task-cnt">${mTasks.length}건</span>
-        <button class="btn-add-task" onclick="openTaskModal(null,${mo})">
+        ${canEdit ? `<button class="btn-add-task" onclick="openTaskModal(null,${mo})">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
             <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
           </svg>
           업무 추가
-        </button>
+        </button>` : ''}
       </div>
       <table class="task-table"><tbody>${rows}</tbody></table>
     </div>`;
