@@ -26,6 +26,7 @@ let currentYear     = new Date().getFullYear();
 let currentMonth    = new Date().getMonth() + 1;
 let selectedColor   = COLORS[0];
 let currentUserId   = sessionStorage.getItem('workium_user') || null;
+let _pendingLoginId = null;
 
 let _ready = false;
 const _loaded = { members: false, tasks: false, sites: false, notice: false, memberSites: false, memberNotices: false };
@@ -681,6 +682,7 @@ function openMemberModal(id) {
     document.getElementById('memberName').value  = m.name;
     document.getElementById('memberRole').value  = m.role  || '';
     document.getElementById('memberEmail').value = m.email || '';
+    document.getElementById('memberPin').value   = m.pin   || '';
     buildColorPicker(m.color);
   } else {
     document.getElementById('memberModalTitle').textContent = '부서원 추가';
@@ -688,6 +690,7 @@ function openMemberModal(id) {
     document.getElementById('memberName').value  = '';
     document.getElementById('memberRole').value  = '';
     document.getElementById('memberEmail').value = '';
+    document.getElementById('memberPin').value   = '';
     buildColorPicker();
   }
   modal.classList.add('open');
@@ -703,11 +706,13 @@ async function saveMember() {
   if (!name) { showToast('이름을 입력해주세요.'); return; }
 
   const id   = document.getElementById('memberId').value;
+  const pinVal = document.getElementById('memberPin').value.trim();
   const data = {
     name,
     role:  document.getElementById('memberRole').value.trim(),
     email: document.getElementById('memberEmail').value.trim(),
     color: selectedColor,
+    pin:   pinVal,
   };
 
   closeMemberModal();
@@ -881,10 +886,12 @@ async function deleteSite(id) {
 
 // ── 접속자 선택 ───────────────────────────────────────
 function openLoginModal() {
+  document.getElementById('loginStep1').style.display = 'block';
+  document.getElementById('loginStep2').style.display = 'none';
   const list = document.getElementById('loginMemberList');
   list.innerHTML = members.map(m => `
     <button class="login-member-btn ${m.id === currentUserId ? 'selected' : ''}"
-            onclick="selectUser('${m.id}')">
+            onclick="pickLoginMember('${m.id}')">
       <div class="avatar-circle" style="background:${m.color};width:36px;height:36px;font-size:14px">${m.name[0]}</div>
       <div>
         <div style="font-weight:700;font-size:13.5px">${escHtml(m.name)}</div>
@@ -905,6 +912,39 @@ function selectUser(id) {
   renderNotice();
   renderSites();
   showToast(`${getMember(id)?.name}님으로 접속했습니다.`);
+}
+
+function pickLoginMember(id) {
+  const m = getMember(id);
+  if (!m) return;
+  if (!m.pin) { selectUser(id); return; }
+  _pendingLoginId = id;
+  document.getElementById('loginStep1').style.display = 'none';
+  document.getElementById('loginStep2').style.display = 'block';
+  document.getElementById('loginPinAvatar').style.background = m.color;
+  document.getElementById('loginPinAvatar').textContent = m.name[0];
+  document.getElementById('loginPinName').textContent = m.name;
+  document.getElementById('loginPinInput').value = '';
+  setTimeout(() => document.getElementById('loginPinInput').focus(), 50);
+}
+
+function backToMemberList() {
+  _pendingLoginId = null;
+  document.getElementById('loginStep1').style.display = 'block';
+  document.getElementById('loginStep2').style.display = 'none';
+}
+
+function confirmPin() {
+  const input = document.getElementById('loginPinInput').value;
+  const m = getMember(_pendingLoginId);
+  if (!m) return;
+  if (input !== m.pin) {
+    showToast('PIN이 틀렸습니다.');
+    document.getElementById('loginPinInput').value = '';
+    document.getElementById('loginPinInput').focus();
+    return;
+  }
+  selectUser(_pendingLoginId);
 }
 
 function renderCurrentUser() {

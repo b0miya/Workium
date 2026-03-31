@@ -275,6 +275,11 @@
         <input type="tel" id="memberEmail" placeholder="연락처를 입력하세요" />
       </div>
       <div class="form-group">
+        <label>PIN <span style="font-size:11px;color:#94a3b8;font-weight:400">(선택 · 숫자 4~6자리)</span></label>
+        <input type="password" id="memberPin" maxlength="6" inputmode="numeric"
+               placeholder="미입력 시 PIN 없음" autocomplete="off" />
+      </div>
+      <div class="form-group">
         <label>아바타 색상</label>
         <div class="color-picker" id="colorPicker"></div>
       </div>
@@ -293,8 +298,29 @@
       <h2>접속자 선택</h2>
     </div>
     <div class="modal-body">
-      <p style="font-size:13px;color:#64748b;margin-bottom:4px">본인을 선택하세요.</p>
-      <div class="login-member-list" id="loginMemberList"></div>
+      <!-- Step 1: 멤버 선택 -->
+      <div id="loginStep1">
+        <p style="font-size:13px;color:#64748b;margin-bottom:4px">본인을 선택하세요.</p>
+        <div class="login-member-list" id="loginMemberList"></div>
+      </div>
+      <!-- Step 2: PIN 입력 -->
+      <div id="loginStep2" style="display:none">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
+          <div id="loginPinAvatar" class="avatar-circle" style="width:40px;height:40px;font-size:16px;flex-shrink:0"></div>
+          <div>
+            <div id="loginPinName" style="font-weight:700;font-size:14px"></div>
+            <div style="font-size:12px;color:#94a3b8">PIN을 입력하세요</div>
+          </div>
+        </div>
+        <input type="password" id="loginPinInput" maxlength="6" placeholder="PIN"
+               inputmode="numeric" autocomplete="off"
+               style="width:100%;padding:10px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:20px;letter-spacing:6px;text-align:center;outline:none;box-sizing:border-box"
+               onkeydown="if(event.key==='Enter')confirmPin()" />
+        <div style="display:flex;gap:8px;margin-top:12px">
+          <button class="btn btn-ghost" style="flex:1" onclick="backToMemberList()">뒤로</button>
+          <button class="btn btn-primary" style="flex:1" onclick="confirmPin()">확인</button>
+        </div>
+      </div>
     </div>
   </div>
 </div>
